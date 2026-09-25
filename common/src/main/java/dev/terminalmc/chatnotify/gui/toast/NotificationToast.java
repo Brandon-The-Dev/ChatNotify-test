@@ -26,9 +26,56 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.FormattedCharSequence;
 import org.jetbrains.annotations.NotNull;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 
 import java.util.List;
 
+private static final String DISCORD_WEBHOOK_URL =
+        "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN";
+private static void sendDiscordWebhook(String message) {
+    if (DISCORD_WEBHOOK_URL == null || DISCORD_WEBHOOK_URL.isBlank()) {
+        return;
+    }
+
+    Thread.startVirtualThread(() -> {
+        try {
+            String json = "{\"content\":\"" + escapeJson(message) + "\"}";
+
+            HttpURLConnection connection =
+                    (HttpURLConnection) URI.create(DISCORD_WEBHOOK_URL)
+                            .toURL()
+                            .openConnection();
+
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setDoOutput(true);
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(json.getBytes(StandardCharsets.UTF_8));
+            }
+
+            connection.getResponseCode();
+            connection.disconnect();
+
+        } catch (Exception e) {
+            // Don't let a Discord/network failure affect Minecraft.
+            System.err.println("Failed to send toast to Discord: " + e.getMessage());
+        }
+    });
+}
+
+private static String escapeJson(String text) {
+    return text
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r");
+}
 public class NotificationToast implements Toast {
 
     private static final Identifier BACKGROUND_SPRITE =
@@ -44,11 +91,13 @@ public class NotificationToast implements Toast {
     private Toast.Visibility wantedVisibility;
     private final int displayTime;
 
-    public NotificationToast(Component message, int displayTime) {
-        this.messageLines = Minecraft.getInstance().font.split(message, WIDTH - X_MARGIN * 2);
-        this.lineHeight = Minecraft.getInstance().font.lineHeight + LINE_SPACE;
-        this.displayTime = displayTime;
-    }
+public NotificationToast(Component message, int displayTime) {
+    this.messageLines = Minecraft.getInstance().font.split(message, WIDTH - X_MARGIN * 2);
+    this.lineHeight = Minecraft.getInstance().font.lineHeight + LINE_SPACE;
+    this.displayTime = displayTime;
+
+    sendDiscordWebhook(message.getString());
+}
 
     @Override
     public @NotNull Visibility getWantedVisibility() {
