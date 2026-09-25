@@ -16,6 +16,7 @@
 
 package dev.terminalmc.chatnotify.gui.toast;
 
+import dev.terminalmc.chatnotify.config.Config;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -37,16 +38,11 @@ public class NotificationToast implements Toast {
 
     private static final Identifier BACKGROUND_SPRITE =
             Identifier.withDefaultNamespace("toast/advancement");
-
     private static final int WIDTH = 160;
     private static final int HEIGHT = 32;
     private static final int X_MARGIN = 10;
     private static final int Y_MARGIN = 6;
     private static final int LINE_SPACE = 3;
-
-    // Discord webhook
-    private static final String DISCORD_WEBHOOK_URL =
-            "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN";
 
     private final int lineHeight;
     private final List<FormattedCharSequence> messageLines;
@@ -54,38 +50,27 @@ public class NotificationToast implements Toast {
     private final int displayTime;
 
     public NotificationToast(Component message, int displayTime) {
-        this.messageLines =
-                Minecraft.getInstance().font.split(message, WIDTH - X_MARGIN * 2);
-
-        this.lineHeight =
-                Minecraft.getInstance().font.lineHeight + LINE_SPACE;
-
+        this.messageLines = Minecraft.getInstance().font.split(message, WIDTH - X_MARGIN * 2);
+        this.lineHeight = Minecraft.getInstance().font.lineHeight + LINE_SPACE;
         this.displayTime = displayTime;
 
-        // Send the toast message to Discord
         sendDiscordWebhook(message.getString());
     }
 
     private static void sendDiscordWebhook(String message) {
-        if (DISCORD_WEBHOOK_URL == null || DISCORD_WEBHOOK_URL.isBlank()) {
+        String webhookUrl = Config.get().discordWebhookUrl;
+        if (webhookUrl == null || webhookUrl.isBlank()) {
             return;
         }
 
         Thread.startVirtualThread(() -> {
+            HttpURLConnection connection = null;
             try {
-                String json =
-                        "{\"content\":\"" + escapeJson(message) + "\"}";
+                String json = "{\"content\":\"" + escapeJson(message) + "\"}";
 
-                HttpURLConnection connection =
-                        (HttpURLConnection) URI.create(DISCORD_WEBHOOK_URL)
-                                .toURL()
-                                .openConnection();
-
+                connection = (HttpURLConnection) URI.create(webhookUrl).toURL().openConnection();
                 connection.setRequestMethod("POST");
-                connection.setRequestProperty(
-                        "Content-Type",
-                        "application/json"
-                );
+                connection.setRequestProperty("Content-Type", "application/json");
                 connection.setDoOutput(true);
                 connection.setConnectTimeout(5000);
                 connection.setReadTimeout(5000);
@@ -95,14 +80,12 @@ public class NotificationToast implements Toast {
                 }
 
                 connection.getResponseCode();
-                connection.disconnect();
-
             } catch (Exception e) {
-                // Discord failure should not crash Minecraft
-                System.err.println(
-                        "Failed to send toast to Discord: "
-                                + e.getMessage()
-                );
+                System.err.println("Failed to send toast to Discord: " + e.getMessage());
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
             }
         });
     }
@@ -121,25 +104,16 @@ public class NotificationToast implements Toast {
     }
 
     @Override
-    public void update(
-            @NotNull ToastManager manager,
-            long elapsedTime
-    ) {
+    public void update(@NotNull ToastManager manager, long elapsedTime) {
         this.wantedVisibility =
-                elapsedTime <
-                        displayTime *
-                                manager.getNotificationDisplayTimeMultiplier()
-                        ? Visibility.SHOW
-                        : Visibility.HIDE;
+                elapsedTime < displayTime * manager.getNotificationDisplayTimeMultiplier()
+                        ? Visibility.SHOW : Visibility.HIDE;
     }
 
     @Override
-    public void render(
-            @NotNull GuiGraphics graphics,
-            @NotNull Font font,
-            long elapsedTime
-    ) {
+    public void render(@NotNull GuiGraphics graphics, @NotNull Font font, long elapsedTime) {
         if (messageLines.size() <= 1) {
+            // Message fits in a single line, render a single sprite
             graphics.blitSprite(
                     RenderPipelines.GUI_TEXTURED,
                     BACKGROUND_SPRITE,
@@ -149,54 +123,25 @@ public class NotificationToast implements Toast {
                     height()
             );
         } else {
+            // Message requires multiple lines, stretch vertically by rendering
+            // multiple sprites
             int width = WIDTH;
-            int height =
-                    HEIGHT +
-                            lineHeight *
-                                    Math.max(
-                                            0,
-                                            messageLines.size() - 2
-                                    );
-
+            int height = HEIGHT + lineHeight * Math.max(0, messageLines.size() - 2);
             int partialSpriteHeight = HEIGHT - 4;
-            int bottomSpriteHeight =
-                    Math.min(
-                            4,
-                            height - partialSpriteHeight
-                    );
+            int bottomSpriteHeight = Math.min(4, height - partialSpriteHeight);
 
-            renderBackgroundRow(
-                    graphics,
-                    width,
-                    0,
-                    0,
-                    partialSpriteHeight
-            );
+            // Top border
+            renderBackgroundRow(graphics, width, 0, 0, partialSpriteHeight);
 
+            // Middle background
             int offset = 10;
-
-            for (
-                    int y = partialSpriteHeight;
-                    y < height - bottomSpriteHeight;
-                    y += offset
-            ) {
+            for (int y = partialSpriteHeight; y < height - bottomSpriteHeight; y += offset) {
                 int vOffset = HEIGHT / 2;
-
-                int vHeight =
-                        Math.min(
-                                HEIGHT / 2,
-                                height - y - bottomSpriteHeight
-                        );
-
-                this.renderBackgroundRow(
-                        graphics,
-                        width,
-                        vOffset,
-                        y,
-                        vHeight
-                );
+                int vHeight = Math.min(HEIGHT / 2, height - y - bottomSpriteHeight);
+                this.renderBackgroundRow(graphics, width, vOffset, y, vHeight);
             }
 
+            // Bottom border
             renderBackgroundRow(
                     graphics,
                     width,
@@ -207,6 +152,7 @@ public class NotificationToast implements Toast {
         }
 
         if (messageLines.size() == 1) {
+            // Single line, center vertically
             graphics.drawString(
                     font,
                     messageLines.getFirst(),
@@ -216,6 +162,7 @@ public class NotificationToast implements Toast {
                     false
             );
         } else {
+            // Multiple lines, justify to top margin
             for (int j = 0; j < messageLines.size(); j++) {
                 graphics.drawString(
                         font,
@@ -239,6 +186,7 @@ public class NotificationToast implements Toast {
         int uWidth = vOffset == 0 ? 20 : 5;
         int uRemainder = Math.min(60, width - uWidth);
 
+        // Left border
         graphics.blitSprite(
                 RenderPipelines.GUI_TEXTURED,
                 BACKGROUND_SPRITE,
@@ -252,13 +200,9 @@ public class NotificationToast implements Toast {
                 vHeight
         );
 
+        // Middle background
         int offset = 64;
-
-        for (
-                int x = uWidth;
-                x < width - uRemainder;
-                x += offset
-        ) {
+        for (int x = uWidth; x < width - uRemainder; x += offset) {
             graphics.blitSprite(
                     RenderPipelines.GUI_TEXTURED,
                     BACKGROUND_SPRITE,
@@ -268,14 +212,12 @@ public class NotificationToast implements Toast {
                     vOffset,
                     x,
                     y,
-                    Math.min(
-                            offset,
-                            width - x - uRemainder
-                    ),
+                    Math.min(offset, width - x - uRemainder),
                     vHeight
             );
         }
 
+        // Right border
         graphics.blitSprite(
                 RenderPipelines.GUI_TEXTURED,
                 BACKGROUND_SPRITE,
